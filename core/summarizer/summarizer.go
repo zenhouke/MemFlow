@@ -40,6 +40,15 @@ func (s *LLMSummarizer) Summarize(ctx context.Context, inputs []string) (string,
 		return inputs[0], nil
 	}
 
+	// 快速路径：如果输入条目很少且总字符数很短，不值得调用 LLM
+	totalLen := 0
+	for _, in := range inputs {
+		totalLen += len(in)
+	}
+	if len(inputs) <= 2 && totalLen < 100 {
+		return s.fallbackSummarize(inputs), nil
+	}
+
 	messages := s.buildSynthesisMessages(inputs)
 
 	summary, err := s.client.Chat(ctx, messages)

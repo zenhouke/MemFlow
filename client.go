@@ -28,6 +28,8 @@ type Metadata = index.Metadata
 
 type CompressionConfig = config.CompressionConfig
 
+type VectorStoreConfig = config.VectorStoreConfig
+
 type LLMClient = llm.LLMClient
 
 type LLMMessage = llm.Message
@@ -49,6 +51,10 @@ func NewWithConfig(cfg config.Config, embedder Embedder) *Client {
 
 func NewSemanticCompressor(cfg CompressionConfig, llmClient LLMClient) *compression.SemanticCompressor {
 	return compression.NewSemanticCompressor(cfg, llmClient)
+}
+
+func NewImportanceEstimatorByLLM(llmClient LLMClient) engine.ImportanceEstimator {
+	return engine.NewImportanceEstimatorByLLM(llmClient)
 }
 
 func (c *Client) SetLLMClient(client LLMClient) {
@@ -103,11 +109,11 @@ func (c *Client) Ask(ctx context.Context, namespace, question string) (string, e
 }
 
 func (c *Client) Get(namespace string) ([]*MemoryItem, error) {
-	return nil, nil
+	return c.engine.Get(namespace)
 }
 
 func (c *Client) Delete(namespace, id string) error {
-	return nil
+	return c.engine.Delete(namespace, id)
 }
 
 func (c *Client) Save(path string) error {

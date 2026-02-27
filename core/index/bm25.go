@@ -3,6 +3,7 @@ package index
 import (
 	"math"
 	"strings"
+	"sync"
 )
 
 type BM25Index struct {
@@ -10,9 +11,11 @@ type BM25Index struct {
 	docFreq    map[string]int
 	docLengths map[string]int
 	avgDocLen  float64
+	totalLen   int // 新增：记录总长度以便增量计算
 	k1         float64
 	b          float64
 	docCount   int
+	mu         sync.RWMutex
 }
 
 func NewBM25Index() *BM25Index {
@@ -26,10 +29,14 @@ func NewBM25Index() *BM25Index {
 }
 
 func (idx *BM25Index) Add(docID string, doc string) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
 	idx.documents[docID] = doc
 
 	terms := idx.tokenize(doc)
 	idx.docLengths[docID] = len(terms)
+	idx.totalLen += len(terms) // 增量更新
 
 	seen := make(map[string]bool)
 	for _, term := range terms {
@@ -39,15 +46,52 @@ func (idx *BM25Index) Add(docID string, doc string) {
 		}
 	}
 
-	totalLen := 0
-	for _, l := range idx.docLengths {
-		totalLen += l
-	}
 	idx.docCount++
-	idx.avgDocLen = float64(totalLen) / float64(idx.docCount)
+	idx.recalculateAvgDocLen()
+}
+
+func (idx *BM25Index) Delete(docID string) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	doc, ok := idx.documents[docID]
+	if !ok {
+		return
+	}
+
+	terms := idx.tokenize(doc)
+	idx.totalLen -= len(terms) // 增量更新
+
+	seen := make(map[string]bool)
+	for _, term := range terms {
+		if !seen[term] {
+			idx.docFreq[term]--
+			if idx.docFreq[term] <= 0 {
+				delete(idx.docFreq, term)
+			}
+			seen[term] = true
+		}
+	}
+
+	delete(idx.documents, docID)
+	delete(idx.docLengths, docID)
+	idx.docCount--
+
+	idx.recalculateAvgDocLen()
+}
+
+func (idx *BM25Index) recalculateAvgDocLen() {
+	if idx.docCount > 0 {
+		idx.avgDocLen = float64(idx.totalLen) / float64(idx.docCount)
+	} else {
+		idx.avgDocLen = 0
+	}
 }
 
 func (idx *BM25Index) Search(query string, topK int) []ScoredDoc {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
 	if len(idx.documents) == 0 {
 		return nil
 	}

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"simplemem/core/config"
 	"simplemem/core/index"
@@ -25,16 +26,18 @@ func (m *MemoryEngine) Search(ctx context.Context, namespace, query string) ([]*
 
 	now := time.Now()
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	m.mu.RLock()
 	space := m.getOrCreateSpace(namespace)
+	m.mu.RUnlock()
+
+	space.mu.RLock()
+	defer space.mu.RUnlock()
 
 	if m.config.EnableHybridSearch {
 		return m.hybridSearch(ctx, query, queryEmbedding, space, now)
 	}
 
-	return m.simpleSearch(queryEmbedding, space, now)
+	return m.simpleSearch(ctx, queryEmbedding, space, now)
 }
 
 func (m *MemoryEngine) hybridSearch(
@@ -62,12 +65,13 @@ func (m *MemoryEngine) hybridSearch(
 }
 
 func (m *MemoryEngine) simpleSearch(
+	ctx context.Context, // 新增 context
 	queryEmbedding []float64,
 	space *MemorySpace,
 	now time.Time,
 ) ([]*MemoryItem, error) {
 
-	results := m.collectAndScore(now, queryEmbedding, space)
+	results := m.collectAndScore(ctx, now, queryEmbedding, space)
 
 	for i := 0; i < len(results); i++ {
 		for j := i + 1; j < len(results); j++ {
@@ -97,33 +101,86 @@ type scored struct {
 	score float64
 }
 
-func (m *MemoryEngine) collectAndScore(now time.Time, q []float64, space *MemorySpace) []scored {
+func (m *MemoryEngine) collectAndScore(ctx context.Context, now time.Time, q []float64, space *MemorySpace) []scored {
+	// 注意：调用此方法前，外部应已对 space.mu 加 RLock
 	var results []scored
 	q32 := utils.ToFloat32(q)
+	seenIDs := make(map[string]bool)
 
+	// 1. 内存短期记忆检索
 	shortNeighbors := space.shortIndex.Search(q32, m.config.TopK)
 	for _, vec := range shortNeighbors {
 		id := vec.Key
 		mem := m.findMemoryItemByID(space.ShortTerm, id)
-		if mem == nil {
-			continue
+		if mem != nil {
+			score := m.score(now, q, mem, m.config.ShortTermDecay)
+			results = append(results, scored{mem, score})
+			seenIDs[id] = true
 		}
-		score := m.score(now, q, mem, m.config.ShortTermDecay)
-		results = append(results, scored{mem, score})
 	}
 
+	// 2. 内存长期记忆检索
 	longNeighbors := space.longIndex.Search(q32, m.config.TopK)
 	for _, vec := range longNeighbors {
 		id := vec.Key
-		mem := m.findMemoryItemByID(space.LongTerm, id)
-		if mem == nil {
-			continue
+		if seenIDs[id] {
+			continue // 避免同一 item 在短/长期重复出现
 		}
-		score := m.score(now, q, mem, m.config.LongTermDecay)
-		results = append(results, scored{mem, score})
+		mem := m.findMemoryItemByID(space.LongTerm, id)
+		if mem != nil {
+			score := m.score(now, q, mem, m.config.LongTermDecay)
+			results = append(results, scored{mem, score})
+			seenIDs[id] = true
+		}
+	}
+
+	// 3. 外部存储补足（如果启用且结果仍不足）
+	if m.store != nil {
+		extResults, err := m.store.Search(ctx, q32, m.config.TopK, nil)
+		if err == nil {
+			for _, res := range extResults {
+				if seenIDs[res.ID] {
+					continue
+				}
+
+				item := m.payloadToMemoryItem(res.Payload)
+				if item != nil {
+					// 外部库通常返回的是向量余弦相似度，我们直接作为分数或进行再次加权
+					results = append(results, scored{item, float64(res.Score)})
+					seenIDs[res.ID] = true
+				}
+			}
+		}
 	}
 
 	return results
+}
+
+func (m *MemoryEngine) payloadToMemoryItem(payload map[string]interface{}) *MemoryItem {
+	// 尝试从 JSON 还原完整对象
+	if jsonVal, ok := payload["item_json"]; ok {
+		if jsonStr, ok := jsonVal.(string); ok {
+			var item MemoryItem
+			if err := json.Unmarshal([]byte(jsonStr), &item); err == nil {
+				return &item
+			}
+		}
+	}
+
+	// 降级处理：如果没有 JSON，尝试从散装 Payload 恢复基础信息
+	content, _ := payload["content"].(string)
+	if content == "" {
+		return nil
+	}
+
+	id, _ := payload["id"].(string)
+	importance, _ := payload["importance"].(float64)
+
+	return &MemoryItem{
+		ID:         id,
+		Content:    content,
+		Importance: importance,
+	}
 }
 
 func (m *MemoryEngine) findMemoryItemByID(items []*MemoryItem, id string) *MemoryItem {

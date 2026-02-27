@@ -2,6 +2,7 @@ package index
 
 import (
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,6 +25,7 @@ type MetadataIndex struct {
 	topicIndex   map[string][]string
 	tagIndex     map[string][]string
 	timeIndex    map[string]time.Time
+	mu           sync.RWMutex
 }
 
 func NewMetadataIndex() *MetadataIndex {
@@ -37,6 +39,9 @@ func NewMetadataIndex() *MetadataIndex {
 }
 
 func (idx *MetadataIndex) Add(docID string, meta Metadata) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
 	idx.metadataList[docID] = meta
 
 	for _, entity := range meta.Entities {
@@ -57,6 +62,52 @@ func (idx *MetadataIndex) Add(docID string, meta Metadata) {
 	idx.timeIndex[docID] = meta.Timestamp
 }
 
+func (idx *MetadataIndex) Delete(docID string) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	meta, ok := idx.metadataList[docID]
+	if !ok {
+		return
+	}
+
+	for _, entity := range meta.Entities {
+		entity = strings.ToLower(entity)
+		idx.entityIndex[entity] = idx.removeFromSlice(idx.entityIndex[entity], docID)
+		if len(idx.entityIndex[entity]) == 0 {
+			delete(idx.entityIndex, entity)
+		}
+	}
+
+	if meta.Topic != "" {
+		topic := strings.ToLower(meta.Topic)
+		idx.topicIndex[topic] = idx.removeFromSlice(idx.topicIndex[topic], docID)
+		if len(idx.topicIndex[topic]) == 0 {
+			delete(idx.topicIndex, topic)
+		}
+	}
+
+	for _, tag := range meta.Tags {
+		tag = strings.ToLower(tag)
+		idx.tagIndex[tag] = idx.removeFromSlice(idx.tagIndex[tag], docID)
+		if len(idx.tagIndex[tag]) == 0 {
+			delete(idx.tagIndex, tag)
+		}
+	}
+
+	delete(idx.metadataList, docID)
+	delete(idx.timeIndex, docID)
+}
+
+func (idx *MetadataIndex) removeFromSlice(slice []string, val string) []string {
+	for i, v := range slice {
+		if v == val {
+			return append(slice[:i], slice[i+1:]...)
+		}
+	}
+	return slice
+}
+
 type MetadataQuery struct {
 	Entities  []string
 	Topic     string
@@ -66,6 +117,9 @@ type MetadataQuery struct {
 }
 
 func (idx *MetadataIndex) Search(query MetadataQuery) []string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
 	if len(idx.metadataList) == 0 {
 		return nil
 	}

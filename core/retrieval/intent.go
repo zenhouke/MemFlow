@@ -43,6 +43,11 @@ func (qa *QueryAnalyzer) Analyze(ctx context.Context, query string) (*QueryInten
 		return qa.ruleBasedAnalyze(query), nil
 	}
 
+	// 快速路径：如果查询非常短（通常是关键词搜索），直接使用规则分析，节省 Token
+	if len(strings.Fields(query)) <= 2 {
+		return qa.ruleBasedAnalyze(query), nil
+	}
+
 	messages := []llm.Message{
 		{
 			Role: "system",

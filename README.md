@@ -1,46 +1,44 @@
 # SimpleMem-Go
 
-Go implementation of [SimpleMem](https://github.com/aiming-lab/SimpleMem) - Efficient Lifelong Memory for LLM Agents.
+SimpleMem-Go is a high-performance Go implementation of the [SimpleMem](https://github.com/aiming-lab/SimpleMem) paper. It provides an efficient lifelong memory system for LLM agents, featuring semantic compression, hybrid retrieval, and automated memory tiering.
 
-## Features
+## 🌟 Key Features
 
-### Core Memory System
-- ✅ **Stage 1: Semantic Structured Compression**
-  - Sliding window processing (WindowSize=10, Overlap=2)
-  - LLM-based memory unit extraction
-  - Coreference resolution (eliminate pronouns)
-  - Temporal normalization (ISO 8601)
-  - Avoid duplication (reference previous window)
+### 1. Deep Semantic Compression
+- **Sliding Window Processing**: Efficiently handles dialogue streams (default WindowSize=10).
+- **End-to-End Extraction**: Extracts memory units, resolves coreferences, and **simultaneously evaluates importance** in a single LLM call to drastically save tokens.
+- **Redundancy Control**: References previous window entries to avoid duplicate memory generation.
 
-- ✅ **Stage 2: Recursive Memory Consolidation**
-  - Time-semantic joint clustering
-  - LLM-based semantic synthesis
-  - Short-term / Long-term memory separation
-  - Original dialogue preservation for traceability
+### 2. Automated Memory Tiering
+- **Hierarchical Storage**: Automatically routes information based on an Importance Score.
+    - **Short-term Memory**: Resides in high-performance in-memory indexes with rapid decay.
+    - **Long-term Memory**: Automatically synced to external vector databases (Qdrant, Milvus, LanceDB) for permanent storage.
+- **Asynchronous Compaction**: A background Goroutine performs recursive consolidation, merging similar memories and extracting higher-level abstractions without blocking the main workflow.
 
-- ✅ **Stage 3: Adaptive Query-Aware Retrieval**
-  - LLM-based intent inference (factual/temporal/reasoning/aggregation)
-  - Dynamic retrieval depth
-  - Hybrid scoring (semantic + lexical + symbolic)
-  - Three-layer indexing (HNSW + BM25 + Metadata)
+### 3. High-Performance Hybrid Retrieval
+- **Adaptive Intent Analysis**: The system analyzes query intent (factual, temporal, reasoning, aggregation) and dynamically adjusts retrieval depth (Top-K).
+- **Token-Saving "Fast Path"**: Automatically triggers local rule-based analysis for short or simple keyword queries, skipping expensive LLM calls.
+- **Triple-Layer Indexing**:
+    - **Semantic**: Vector similarity search based on HNSW.
+    - **Lexical**: Text search based on an optimized BM25 (O(1) incremental updates).
+    - **Symbolic/Metadata**: Hard filtering for time ranges, entities, and topics.
 
-### Additional Features
-- Pluggable embedder interface
-- Pluggable LLM client interface
-- JSON persistence
-- Concurrent-safe operations
-- Configurable parameters
-- Vector store abstraction (supports InMemory, Qdrant)
+### 4. Production-Ready Engineering
+- **Fine-Grained Concurrency**: Namespace-level sharded RWMutex supports high-concurrency operations.
+- **Persistence & Integrity**: Supports full state snapshots with **automatic index rebuilding** upon loading to ensure zero-downtime search readiness.
+- **Pluggable Architecture**: Easily swap LLM clients, Embedders, and Vector Store backends.
 
-## Quick Start
+---
+
+## 🚀 Quick Start
 
 ### Installation
 
 ```bash
-go get github.com/your-repo/simplemem-go
+go get github.com/zenhouke/simplemem-go
 ```
 
-### Basic Usage
+### Basic Usage (In-Memory Mode)
 
 ```go
 package main
@@ -48,151 +46,74 @@ package main
 import (
     "context"
     "time"
-
-    "github.com/sashabaranov/go-openai"
-    "github.com/your-repo/simplemem-go"
+    "simplemem"
 )
-
-// OpenAI Embedder
-type OpenAIEmbedder struct {
-    client *openai.Client
-}
-
-func NewOpenAIEmbedder(apiKey string) *OpenAIEmbedder {
-    return &OpenAIEmbedder{
-        client: openai.NewClient(apiKey),
-    }
-}
-
-func (e *OpenAIEmbedder) Embed(ctx context.Context, text string) ([]float64, error) {
-    resp, err := e.client.CreateEmbeddings(ctx, openai.EmbeddingRequest{
-        Model: openai.Embedding3Small,
-        Input:  []string{text},
-    })
-    if err != nil {
-        return nil, err
-    }
-    return resp.Data[0].Embedding, nil
-}
-
-// OpenAI LLM
-type OpenAILLM struct {
-    client *openai.Client
-}
-
-func NewOpenAILLM(apiKey string) *OpenAILLM {
-    return &OpenAILLM{
-        client: openai.NewClient(apiKey),
-    }
-}
-
-func (l *OpenAILLM) Chat(ctx context.Context, messages []simplemem.LLMMessage) (string, error) {
-    var openaiMsgs []openai.ChatCompletionMessage
-    for _, m := range messages {
-        openaiMsgs = append(openaiMsgs, openai.ChatCompletionMessage{
-            Role:    m.Role,
-            Content: m.Content,
-        })
-    }
-    resp, err := l.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-        Model:    openai.GPT4oMini,
-        Messages: openaiMsgs,
-    })
-    if err != nil {
-        return "", err
-    }
-    return resp.Choices[0].Message.Content, nil
-}
 
 func main() {
     ctx := context.Background()
 
-    // Initialize with real API clients
-    mem := simplemem.New(NewOpenAIEmbedder("your-api-key"))
-    mem.SetLLMClient(NewOpenAILLM("your-api-key"))
+    // 1. Initialize client (Implement the Embedder interface)
+    client := simplemem.New(&MyEmbedder{})
+    
+    // 2. Configure LLM client and intelligent components
+    llmClient := &MyLLMClient{}
+    client.SetLLMClient(llmClient)
+    
+    // Enable LLM-based importance estimator
+    client.SetImportanceEstimator(simplemem.NewImportanceEstimatorByLLM(llmClient))
 
-    // Add dialogue (with automatic compression)
-    mem.AddDialogue(ctx, "user_alice", "Alice", "Let's meet at Starbucks tomorrow at 2pm", time.Now())
-    mem.AddDialogue(ctx, "user_alice", "Bob", "Sure, I'll bring the report", time.Now())
+    // 3. Add dialogues (System handles compression and tiering automatically)
+    client.AddDialogue(ctx, "chat_001", "Alice", "My birthday is May 12th.", time.Now())
+    client.AddDialogue(ctx, "chat_001", "Bob", "Got it, I'll remember that.", time.Now())
 
-    // Search
-    results, _ := mem.Search(ctx, "user_alice", "meeting")
-    for _, r := range results {
-        println(r.Content)
-    }
-
-    // Ask (retrieve + generate answer)
-    answer, _ := mem.Ask(ctx, "user_alice", "When and where is the meeting?")
-    println(answer)
+    // 4. Perform Retrieval-Augmented Generation (RAG)
+    answer, _ := client.Ask(ctx, "chat_001", "When is Alice's birthday?")
+    println("AI Answer:", answer)
 }
 ```
 
-**Install dependencies:**
-```bash
-go get github.com/sashabaranov/go-openai
-```
+### Advanced Usage (External Database Mode)
 
-## Interfaces
-
-### Embedder Interface
+Configure `VectorStoreConfig` to automatically persist high-value memories to an external store like Qdrant:
 
 ```go
-type Embedder interface {
-    Embed(ctx context.Context, text string) ([]float64, error)
-}
-```
-
-### LLM Client Interface
-
-```go
-type LLMClient interface {
-    Chat(ctx context.Context, messages []Message) (string, error)
-}
-
-type Message struct {
-    Role    string // "system", "user", "assistant"
-    Content string
-}
-```
-
-## Configuration
-
-```go
-// Memory Engine Config
 cfg := simplemem.Config{
-    Alpha: 0.6,  // Semantic similarity weight
-    Beta:  0.3,  // Recency weight
-    Gamma: 0.1,  // Importance weight
-    
-    ShortTermDecay: 0.02,   // Short-term memory decay rate
-    LongTermDecay:  0.005,  // Long-term memory decay rate
-    
-    TopK: 5,  // Number of results to return
-    
-    LongTermImportanceThreshold: 0.7,  // Threshold for long-term storage
-    CompactionThreshold:         10,   // Trigger compaction after N items
-    
-    EnableHybridSearch: true,
-    HybridSearchConfig: HybridSearchConfig{
-        SemanticWeight:  0.6,
-        LexicalWeight:   0.3,
-        SymbolicWeight:  0.1,
-        BaseK:           5,
-        MinK:            3,
-        MaxK:            20,
-    },
-
-    CompressionConfig: CompressionConfig{
-        WindowSize:  10,   // Sliding window size
-        OverlapSize: 2,    // Overlap between windows
+    LongTermImportanceThreshold: 0.6, // Memories with score > 0.6 go to DB
+    VectorStoreConfig: simplemem.VectorStoreConfig{
+        Type:           "qdrant",
+        Host:           "localhost",
+        Port:           6334,
+        CollectionName: "agent_memories",
+        Dimension:      1536,
     },
 }
+
+client := simplemem.NewWithConfig(cfg, &MyEmbedder{})
 ```
 
-**Note**: All configuration is centralized in `simplemem.Config`, including compression settings.
+---
 
+## 🛠 Configuration Parameters
 
-## References
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `ShortTermDecay` | 0.02 | Decay rate for memories in short-term storage. |
+| `LongTermImportanceThreshold` | 0.7 | Score required to promote memory to long-term storage. |
+| `CompactionThreshold` | 10 | Number of items that trigger background consolidation. |
+| `EnableHybridSearch` | true | Enable combined semantic + lexical + symbolic search. |
+| `VectorStoreConfig.Type` | "memory" | Storage backend type (memory, qdrant, milvus, lancedb). |
 
-- [SimpleMem Paper](https://arxiv.org/abs/2601.02553)
-- [SimpleMem GitHub](https://github.com/aiming-lab/SimpleMem)
+---
+
+## 📜 Citation
+
+If you use this project in your research, please cite the original SimpleMem paper:
+
+```bibtex
+@article{simplemem2026,
+  title={SimpleMem: Efficient Lifelong Memory for LLM Agents},
+  author={Aiming Lab},
+  journal={arXiv preprint arXiv:2601.02553},
+  year={2026}
+}
+```

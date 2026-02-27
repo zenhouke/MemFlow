@@ -2,6 +2,7 @@ package compression
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"simplemem/core/config"
 	"simplemem/core/llm"
@@ -27,6 +28,7 @@ type MemoryUnit struct {
 	Entities            []string
 	Topic               string
 	Salience            string
+	Importance          float64
 	SourceDialogueIDs   []string
 	SourceDialogueCount int
 }
@@ -168,13 +170,20 @@ OUTPUT FORMAT (JSON):
   "location": "location or null",
   "persons": ["name1", "name2"],
   "entities": ["entity1", "entity2"],
-  "topic": "topic phrase",
-  "salience": "high|medium|low"
-}`,
+  "topic": "topic of the dialogue",
+  "salience": "high|medium|low",
+  "importance": 0.85
+}
+
+Rules:
+1. "content" should be a concise summary of the core information.
+2. "salience" determines if this is a key takeaway.
+3. "importance" is a float between 0.0 and 1.0 reflecting how critical this info is for long-term memory.
+4. Keep the output as a valid single JSON object.`,
 		},
 		{
 			Role:    "user",
-			Content: fmt.Sprintf("Base timestamp: %s\n\n%s\n\nExtract the memory unit:", baseTimestamp.Format(time.RFC3339), contextText),
+			Content: fmt.Sprintf("Base timestamp: %s\n%s\n\nDialogue to extract memory from:\n%s", baseTimestamp.Format(time.RFC3339), contextText, dialogueText.String()),
 		},
 	}
 
@@ -187,94 +196,39 @@ OUTPUT FORMAT (JSON):
 }
 
 func (c *SemanticCompressor) parseResponse(response string, window []Dialogue, windowIndex int) (*MemoryUnit, error) {
-	var content, timestamp, location, topic, salience string
-	var keywords, persons, entities []string
+	// 找到 JSON 的开始和结束，处理 LLM 可能返回的 Markdown 代码块
+	start := strings.Index(response, "{")
+	end := strings.LastIndex(response, "}")
+	if start == -1 || end == -1 || end < start {
+		return c.simpleExtract(window), fmt.Errorf("invalid JSON response")
+	}
+	jsonStr := response[start : end+1]
 
-	lines := strings.Split(response, "\n")
-	inArray := false
+	type extractionResult struct {
+		Content    string   `json:"content"`
+		Keywords   []string `json:"keywords"`
+		Timestamp  string   `json:"timestamp"`
+		Location   string   `json:"location"`
+		Persons    []string `json:"persons"`
+		Entities   []string `json:"entities"`
+		Topic      string   `json:"topic"`
+		Salience   string   `json:"salience"`
+		Importance float64  `json:"importance"`
+	}
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		if strings.Contains(line, "[") || inArray {
-			if strings.HasPrefix(line, "[") && !inArray {
-				inArray = true
-			}
-			if strings.HasPrefix(line, "}") {
-				inArray = false
-				continue
-			}
-
-			if strings.Contains(line, `"content"`) {
-				parts := strings.Split(line, ":")
-				if len(parts) >= 2 {
-					content = strings.Trim(parts[1], `",`)
-				}
-			}
-			if strings.Contains(line, `"keywords"`) {
-				parts := strings.Split(line, ":")
-				if len(parts) >= 2 {
-					kw := strings.Trim(parts[1], `[]",`)
-					if kw != "" {
-						keywords = append(keywords, kw)
-					}
-				}
-			}
-			if strings.Contains(line, `"timestamp"`) {
-				parts := strings.Split(line, ":")
-				if len(parts) >= 2 {
-					ts := strings.Trim(parts[1], `",`)
-					if ts != "" && ts != "null" {
-						timestamp = ts
-					}
-				}
-			}
-			if strings.Contains(line, `"location"`) {
-				parts := strings.Split(line, ":")
-				if len(parts) >= 2 {
-					loc := strings.Trim(parts[1], `",`)
-					if loc != "" && loc != "null" {
-						location = loc
-					}
-				}
-			}
-			if strings.Contains(line, `"persons"`) {
-				parts := strings.Split(line, ":")
-				if len(parts) >= 2 {
-					p := strings.Trim(parts[1], `[]",`)
-					if p != "" {
-						persons = append(persons, p)
-					}
-				}
-			}
-			if strings.Contains(line, `"entities"`) {
-				parts := strings.Split(line, ":")
-				if len(parts) >= 2 {
-					e := strings.Trim(parts[1], `[]",`)
-					if e != "" {
-						entities = append(entities, e)
-					}
-				}
-			}
-			if strings.Contains(line, `"topic"`) {
-				parts := strings.Split(line, ":")
-				if len(parts) >= 2 {
-					topic = strings.Trim(parts[1], `",`)
-				}
-			}
-			if strings.Contains(line, `"salience"`) {
-				parts := strings.Split(line, ":")
-				if len(parts) >= 2 {
-					salience = strings.Trim(parts[1], `",`)
-				}
-			}
-		}
+	var res extractionResult
+	if err := json.Unmarshal([]byte(jsonStr), &res); err != nil {
+		return c.simpleExtract(window), err
 	}
 
 	var parsedTime *time.Time
-	if timestamp != "" {
-		if t, err := time.Parse("2006-01-02T15:04:05", timestamp); err == nil {
-			parsedTime = &t
+	if res.Timestamp != "" && res.Timestamp != "null" {
+		layouts := []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04:05"}
+		for _, layout := range layouts {
+			if t, err := time.Parse(layout, res.Timestamp); err == nil {
+				parsedTime = &t
+				break
+			}
 		}
 	}
 
@@ -283,21 +237,22 @@ func (c *SemanticCompressor) parseResponse(response string, window []Dialogue, w
 		dialogueIDs = append(dialogueIDs, d.ID)
 	}
 
-	if content == "" {
+	if res.Content == "" {
 		return c.simpleExtract(window), nil
 	}
 
 	return &MemoryUnit{
 		ID:                  fmt.Sprintf("unit-%d-%d", windowIndex, time.Now().UnixNano()),
-		Content:             content,
+		Content:             res.Content,
 		OriginalContent:     extractOriginal(window),
-		Keywords:            keywords,
+		Keywords:            res.Keywords,
 		Timestamp:           parsedTime,
-		Location:            location,
-		Persons:             uniqueStrings(append(persons, extractSpeakers(window)...)),
-		Entities:            uniqueStrings(entities),
-		Topic:               topic,
-		Salience:            salience,
+		Location:            res.Location,
+		Persons:             uniqueStrings(append(res.Persons, extractSpeakers(window)...)),
+		Entities:            uniqueStrings(res.Entities),
+		Topic:               res.Topic,
+		Salience:            res.Salience,
+		Importance:          res.Importance,
 		SourceDialogueIDs:   dialogueIDs,
 		SourceDialogueCount: len(window),
 	}, nil
