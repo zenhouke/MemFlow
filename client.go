@@ -123,3 +123,7 @@ func (c *Client) Save(path string) error {
 func (c *Client) Load(path string) error {
 	return c.engine.LoadFromFile(path)
 }
+
+func (c *Client) RebuildIndex(namespace string) {
+	c.engine.RebuildIndex(namespace)
+}

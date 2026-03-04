@@ -58,3 +58,24 @@ func (m *MemoryEngine) SetSummarizer(s summarizer.Summarizer) {
 func (m *MemoryEngine) SetCompressor(c *compression.SemanticCompressor) {
 	m.compressor = c
 }
+
+func (m *MemoryEngine) RebuildIndex(namespace string) {
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	m.mu.RLock()
+	space, ok := m.getSpace(namespace)
+	m.mu.RUnlock()
+
+	if ok {
+		space.mu.Lock()
+		defer space.mu.Unlock()
+		space.RebuildIndex()
+	}
+}
+
+func (m *MemoryEngine) getSpace(namespace string) (*MemorySpace, bool) {
+	space, ok := m.spaces[namespace]
+	return space, ok
+}
