@@ -1,8 +1,8 @@
 package engine
 
 import (
-	"simplemem/core/index"
-	"simplemem/core/utils"
+	"memflow/core/index"
+	"memflow/core/utils"
 	"sync"
 	"time"
 

@@ -3,7 +3,7 @@ package vectorstore
 import (
 	"context"
 	"fmt"
-	"simplemem/core/config"
+	"memflow/core/config"
 
 	pb "github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"

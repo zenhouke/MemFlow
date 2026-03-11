@@ -3,7 +3,7 @@ package summarizer
 import (
 	"context"
 	"fmt"
-	"simplemem/core/llm"
+	"memflow/core/llm"
 	"strings"
 )
 

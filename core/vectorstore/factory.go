@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"simplemem/core/config"
+	"memflow/core/config"
 	"time"
 )
 

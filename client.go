@@ -1,14 +1,14 @@
-package simplemem
+package memflow
 
 import (
 	"context"
-	"simplemem/core/compression"
-	"simplemem/core/config"
-	"simplemem/core/embedder"
-	"simplemem/core/engine"
-	"simplemem/core/index"
-	"simplemem/core/llm"
-	"simplemem/core/summarizer"
+	"memflow/core/compression"
+	"memflow/core/config"
+	"memflow/core/embedder"
+	"memflow/core/engine"
+	"memflow/core/index"
+	"memflow/core/llm"
+	"memflow/core/summarizer"
 	"time"
 )
 

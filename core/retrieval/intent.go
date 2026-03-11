@@ -3,7 +3,7 @@ package retrieval
 import (
 	"context"
 	"encoding/json"
-	"simplemem/core/llm"
+	"memflow/core/llm"
 	"strings"
 	"time"
 )

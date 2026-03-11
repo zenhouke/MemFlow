@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"simplemem"
-	"simplemem/core/embedder"
-	"simplemem/core/llm"
+	"memflow"
+	"memflow/core/embedder"
+	"memflow/core/llm"
 	"strings"
 	"time"
 )
@@ -23,14 +23,14 @@ func main() {
 	emb := embedder.NewOpenAIEmbedder(lmStudioBaseURL, "not-needed", embeddingModel)
 	llmClient := llm.NewOpenAILLMClient(lmStudioBaseURL, "not-needed", modelName)
 
-	config := simplemem.Config{
+	config := memflow.Config{
 		LongTermImportanceThreshold: 0.7,
 		EnableHybridSearch:          true,
 	}
 
-	client := simplemem.NewWithConfig(config, emb)
+	client := memflow.NewWithConfig(config, emb)
 	client.SetLLMClient(llmClient)
-	client.SetImportanceEstimator(simplemem.NewImportanceEstimatorByLLM(llmClient))
+	client.SetImportanceEstimator(memflow.NewImportanceEstimatorByLLM(llmClient))
 
 	ctx := context.Background()
 	namespace := "terminal_chat_user"

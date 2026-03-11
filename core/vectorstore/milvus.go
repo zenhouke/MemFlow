@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"simplemem/core/config"
+	"memflow/core/config"
 	"strings"
 
 	"github.com/milvus-io/milvus-sdk-go/v2/client"

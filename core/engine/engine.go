@@ -1,12 +1,12 @@
 package engine
 
 import (
-	"simplemem/core/compression"
-	"simplemem/core/config"
-	"simplemem/core/embedder"
-	"simplemem/core/llm"
-	"simplemem/core/summarizer"
-	"simplemem/core/vectorstore"
+	"memflow/core/compression"
+	"memflow/core/config"
+	"memflow/core/embedder"
+	"memflow/core/llm"
+	"memflow/core/summarizer"
+	"memflow/core/vectorstore"
 	"sync"
 )
 

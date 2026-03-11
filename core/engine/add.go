@@ -2,10 +2,10 @@ package engine
 
 import (
 	"context"
-	"simplemem/core/compression"
-	"simplemem/core/index"
-	"simplemem/core/utils"
-	"simplemem/core/vectorstore"
+	"memflow/core/compression"
+	"memflow/core/index"
+	"memflow/core/utils"
+	"memflow/core/vectorstore"
 	"strings"
 	"time"
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"simplemem/core/config"
+	"memflow/core/config"
 	"sort"
 	"sync"
 )

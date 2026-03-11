@@ -2,8 +2,8 @@ package engine
 
 import (
 	"context"
-	"simplemem/core/index"
-	"simplemem/core/utils"
+	"memflow/core/index"
+	"memflow/core/utils"
 
 	"github.com/coder/hnsw"
 )

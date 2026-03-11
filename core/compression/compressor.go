@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"simplemem/core/config"
-	"simplemem/core/llm"
+	"memflow/core/config"
+	"memflow/core/llm"
 	"strings"
 	"time"
 )

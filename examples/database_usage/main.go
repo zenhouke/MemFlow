@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"simplemem"
+	"memflow"
 )
 
 // SimpleEmbedder 模拟向量化（1536维，对应 OpenAI 默认维度）
@@ -23,7 +23,7 @@ func (e *SimpleEmbedder) Embed(ctx context.Context, text string) ([]float64, err
 // MockLLM 模拟 LLM
 type MockLLM struct{}
 
-func (l *MockLLM) Chat(ctx context.Context, messages []simplemem.LLMMessage) (string, error) {
+func (l *MockLLM) Chat(ctx context.Context, messages []memflow.LLMMessage) (string, error) {
 	return "Mock Answer based on database records.", nil
 }
 
@@ -32,9 +32,9 @@ func main() {
 
 	// 1. 配置数据库驱动 (以 Qdrant 为例)
 	// 确保你已经启动了 Qdrant: docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
-	cfg := simplemem.Config{
+	cfg := memflow.Config{
 		LongTermImportanceThreshold: 0.6, // 降低阈值，让更多条目进入数据库
-		VectorStoreConfig: simplemem.VectorStoreConfig{
+		VectorStoreConfig: memflow.VectorStoreConfig{
 			Type:           "qdrant",
 			Host:           "localhost",
 			Port:           6334,
@@ -45,7 +45,7 @@ func main() {
 
 	// 2. 初始化客户端
 	// 注意：内部会尝试连接 Qdrant，如果连接失败，engine.store 将为 nil，并降级为内存模式
-	client := simplemem.NewWithConfig(cfg, &SimpleEmbedder{})
+	client := memflow.NewWithConfig(cfg, &SimpleEmbedder{})
 	client.SetLLMClient(&MockLLM{})
 
 	fmt.Println(">>> Database Mode: Initialized with Qdrant config")

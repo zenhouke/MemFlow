@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"simplemem"
-	"simplemem/core/embedder"
-	"simplemem/core/llm"
+	"memflow"
+	"memflow/core/embedder"
+	"memflow/core/llm"
 	"time"
 )
 
@@ -24,17 +24,17 @@ func main() {
 	llmClient := llm.NewOpenAILLMClient(lmStudioBaseURL, "not-needed", modelName)
 
 	// 4. 配置 SimpleMem
-	config := simplemem.Config{
+	config := memflow.Config{
 		LongTermImportanceThreshold: 0.7,  // 重要性高于 0.7 的对话会自动存入长期记忆
 		EnableHybridSearch:          true, // 开启混合搜索
 	}
 
 	// 5. 创建 SimpleMem 客户端
-	client := simplemem.NewWithConfig(config, emb)
+	client := memflow.NewWithConfig(config, emb)
 
 	// 设置真实 LLM，开启“基于 LLM 的重要性评估器”
 	client.SetLLMClient(llmClient)
-	client.SetImportanceEstimator(simplemem.NewImportanceEstimatorByLLM(llmClient))
+	client.SetImportanceEstimator(memflow.NewImportanceEstimatorByLLM(llmClient))
 
 	ctx := context.Background()
 	namespace := "lm_studio_test_user"
@@ -51,7 +51,7 @@ func main() {
 
 	fmt.Println("步骤 1: 模拟对话对话流...")
 
-	dialogues := []simplemem.Dialogue{
+	dialogues := []memflow.Dialogue{
 		{
 			ID:        "d1",
 			Speaker:   "用户",

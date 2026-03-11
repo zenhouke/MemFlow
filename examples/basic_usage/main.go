@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"simplemem"
+	"memflow"
 )
 
 type SimpleEmbedder struct{}
@@ -25,7 +25,7 @@ func (e *SimpleEmbedder) Embed(ctx context.Context, text string) ([]float64, err
 
 type MockLLM struct{}
 
-func (l *MockLLM) Chat(ctx context.Context, messages []simplemem.LLMMessage) (string, error) {
+func (l *MockLLM) Chat(ctx context.Context, messages []memflow.LLMMessage) (string, error) {
 
 	var lastMsg string
 	for _, m := range messages {
@@ -46,18 +46,18 @@ func (l *MockLLM) Chat(ctx context.Context, messages []simplemem.LLMMessage) (st
 func main() {
 	ctx := context.Background()
 
-	client := simplemem.New(&SimpleEmbedder{})
+	client := memflow.New(&SimpleEmbedder{})
 
 	llmClient := &MockLLM{}
 	client.SetLLMClient(llmClient)
 
 	// 启用 LLM 重要性评估器
-	client.SetImportanceEstimator(simplemem.NewImportanceEstimatorByLLM(llmClient))
+	client.SetImportanceEstimator(memflow.NewImportanceEstimatorByLLM(llmClient))
 
 	fmt.Println(">>> Adding dialogues...")
 	namespace := "demo_user"
 
-	dialogues := []simplemem.Dialogue{
+	dialogues := []memflow.Dialogue{
 		{
 			ID:        "d1",
 			Speaker:   "Alice",

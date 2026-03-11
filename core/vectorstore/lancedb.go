@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"simplemem/core/config"
+	"memflow/core/config"
 	"sort"
 	"strings"
 	"sync"
