@@ -77,6 +77,132 @@ func TestHybrid_Search_UsesHybridPath_ConfigEnabled(t *testing.T) {
 	}
 }
 
+func TestHybrid_Intent_ShortQueryFastPath_OneAndTwoTokens_NoLLMCall(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "one_token", query: "status"},
+		{name: "two_tokens", query: "status update"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := newHybridTestEngine(&fakeEmbedder{fixed: []float64{1, 0}}, now)
+			eng.config.HybridSearchConfig.EnableAdaptive = false
+			eng.config.HybridSearchConfig.BaseK = 3
+
+			llmFake := &fakeLLMClient{response: `{"type":"aggregation","complexity":0.9,"retrieval_depth":20}`}
+			eng.SetLLMClient(llmFake)
+
+			if err := eng.Add(context.Background(), "ns", "status update from alpha", 0.3); err != nil {
+				t.Fatalf("add fixture failed: %v", err)
+			}
+
+			_, err := eng.Search(context.Background(), "ns", tc.query)
+			if err != nil {
+				t.Fatalf("search failed: %v", err)
+			}
+			if llmFake.chatCallCount != 0 {
+				t.Fatalf("expected no llm call for short query %q, got %d", tc.query, llmFake.chatCallCount)
+			}
+		})
+	}
+}
+
+func TestHybrid_Intent_ThreeTokens_NotFastPath(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	eng := newHybridTestEngine(&fakeEmbedder{fixed: []float64{1, 0}}, now)
+	eng.config.HybridSearchConfig.EnableAdaptive = false
+	eng.config.HybridSearchConfig.BaseK = 3
+
+	llmFake := &fakeLLMClient{response: `{"type":"factual","complexity":0.1,"retrieval_depth":1}`}
+	eng.SetLLMClient(llmFake)
+
+	for i := 0; i < 4; i++ {
+		if err := eng.Add(context.Background(), "ns", fmt.Sprintf("alpha beta gamma fixture %d", i), 0.3); err != nil {
+			t.Fatalf("add fixture %d failed: %v", i, err)
+		}
+	}
+
+	res, err := eng.Search(context.Background(), "ns", "alpha beta gamma")
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if llmFake.chatCallCount != 1 {
+		t.Fatalf("expected one llm call for 3-token query, got %d", llmFake.chatCallCount)
+	}
+	if len(res) != 1 {
+		t.Fatalf("expected retrieval_depth from llm to apply (1), got %d", len(res))
+	}
+}
+
+func TestHybrid_Intent_LLMFailure_FallsBackRuleBased(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	eng := newHybridTestEngine(&fakeEmbedder{fixed: []float64{1, 0}}, now)
+	eng.config.HybridSearchConfig.EnableAdaptive = false
+	eng.config.HybridSearchConfig.BaseK = 4
+
+	llmFake := &fakeLLMClient{err: errors.New("llm unavailable")}
+	eng.SetLLMClient(llmFake)
+
+	addKSelectionFixtures(t, eng, "ns", 16)
+
+	res, err := eng.Search(context.Background(), "ns", "why did deploy fail")
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if llmFake.chatCallCount != 1 {
+		t.Fatalf("expected one llm call before fallback, got %d", llmFake.chatCallCount)
+	}
+	if len(res) != 8 {
+		t.Fatalf("expected rule-based fallback depth baseK*2 (8), got %d", len(res))
+	}
+}
+
+func TestHybrid_Intent_LLMSuccess_UsesIntentFields(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	eng := newHybridTestEngine(&fakeEmbedder{fixed: []float64{1, 0}}, now)
+	eng.config.HybridSearchConfig = config.HybridSearchConfig{
+		SemanticWeight: 0.0,
+		LexicalWeight:  0.0,
+		SymbolicWeight: 1.0,
+		EnableAdaptive: false,
+		BaseK:          3,
+		Delta:          2.0,
+		MinK:           3,
+		MaxK:           20,
+	}
+
+	llmFake := &fakeLLMClient{response: `{"type":"factual","keywords":["status","update"],"entities":["ProjectZephyr"],"complexity":0.2,"reasoning":"entity-specific lookup","retrieval_depth":2}`}
+	eng.SetLLMClient(llmFake)
+
+	if err := eng.Add(context.Background(), "ns", "status update projectzephyr today", 0.3); err != nil {
+		t.Fatalf("add entity fixture failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "status update unrelated today", 0.3); err != nil {
+		t.Fatalf("add non-entity fixture failed: %v", err)
+	}
+
+	mustTagEntityOnContent(t, eng, "ns", "status update projectzephyr today", "ProjectZephyr")
+
+	res, err := eng.Search(context.Background(), "ns", "status update projectzephyr today please")
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if llmFake.chatCallCount != 1 {
+		t.Fatalf("expected llm to be called once, got %d", llmFake.chatCallCount)
+	}
+	if len(res) != 2 {
+		t.Fatalf("expected retrieval_depth from llm to apply (2), got %d", len(res))
+	}
+	if res[0].Content != "status update projectzephyr today" {
+		t.Fatalf("expected entity-matched item ranked first, got %q", res[0].Content)
+	}
+}
+
 func mustTagEntityOnContent(t *testing.T, eng *MemoryEngine, namespace, content, entity string) {
 	t.Helper()
 
