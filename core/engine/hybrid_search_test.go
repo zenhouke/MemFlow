@@ -203,6 +203,286 @@ func TestHybrid_Intent_LLMSuccess_UsesIntentFields(t *testing.T) {
 	}
 }
 
+func TestHybrid_Fusion_SemanticDominantOrdering(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+
+	emb := &fakeEmbedder{vectors: map[string][]float64{
+		"alpha signal probe":         {1, 0},
+		"semantic winner signal":     {1, 0},
+		"alpha alpha alpha rareterm": {0, 1},
+		"irrelevant filler":          {0, 1},
+	}}
+
+	eng := newHybridTestEngine(emb, now)
+	eng.config.HybridSearchConfig = config.HybridSearchConfig{
+		SemanticWeight: 0.9,
+		LexicalWeight:  0.1,
+		SymbolicWeight: 0.0,
+		EnableAdaptive: false,
+		BaseK:          3,
+		Delta:          2.0,
+		MinK:           3,
+		MaxK:           20,
+	}
+
+	llmFake := &fakeLLMClient{response: `{"type":"factual","keywords":["alpha","signal"],"entities":[],"complexity":0.2,"retrieval_depth":3}`}
+	eng.SetLLMClient(llmFake)
+
+	if err := eng.Add(context.Background(), "ns", "semantic winner signal", 0.2); err != nil {
+		t.Fatalf("add semantic winner failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "alpha alpha alpha rareterm", 0.2); err != nil {
+		t.Fatalf("add lexical-heavy doc failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "irrelevant filler", 0.2); err != nil {
+		t.Fatalf("add filler doc failed: %v", err)
+	}
+
+	res, err := eng.Search(context.Background(), "ns", "alpha signal probe")
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(res) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(res))
+	}
+	if res[0].Content != "semantic winner signal" {
+		t.Fatalf("expected semantic winner ranked first, got %q", res[0].Content)
+	}
+	if res[1].Content != "alpha alpha alpha rareterm" {
+		t.Fatalf("expected lexical-heavy doc ranked second, got %q", res[1].Content)
+	}
+}
+
+func TestHybrid_Fusion_LexicalDominantOrdering(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+
+	emb := &fakeEmbedder{vectors: map[string][]float64{
+		"omega token search":      {1, 0},
+		"semantic winner search":  {1, 0},
+		"omega omega omega token": {0, 1},
+		"neutral filler":          {0, 1},
+	}}
+
+	eng := newHybridTestEngine(emb, now)
+	eng.config.HybridSearchConfig = config.HybridSearchConfig{
+		SemanticWeight: 0.1,
+		LexicalWeight:  0.9,
+		SymbolicWeight: 0.0,
+		EnableAdaptive: false,
+		BaseK:          3,
+		Delta:          2.0,
+		MinK:           3,
+		MaxK:           20,
+	}
+
+	llmFake := &fakeLLMClient{response: `{"type":"factual","keywords":["omega","token"],"entities":[],"complexity":0.2,"retrieval_depth":3}`}
+	eng.SetLLMClient(llmFake)
+
+	if err := eng.Add(context.Background(), "ns", "semantic winner search", 0.2); err != nil {
+		t.Fatalf("add semantic doc failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "omega omega omega token", 0.2); err != nil {
+		t.Fatalf("add lexical winner failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "neutral filler", 0.2); err != nil {
+		t.Fatalf("add filler doc failed: %v", err)
+	}
+
+	res, err := eng.Search(context.Background(), "ns", "omega token search")
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(res) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(res))
+	}
+	if res[0].Content != "omega omega omega token" {
+		t.Fatalf("expected lexical winner ranked first, got %q", res[0].Content)
+	}
+	if res[1].Content != "semantic winner search" {
+		t.Fatalf("expected semantic doc ranked second, got %q", res[1].Content)
+	}
+}
+
+func TestHybrid_Fusion_SymbolicConstraintBoost(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+
+	emb := &fakeEmbedder{vectors: map[string][]float64{
+		"zephyr status check":        {1, 0},
+		"general status winner":      {1, 0},
+		"project zephyr constrained": {0.8, 0.6},
+	}}
+
+	eng := newHybridTestEngine(emb, now)
+	eng.config.HybridSearchConfig = config.HybridSearchConfig{
+		SemanticWeight: 0.4,
+		LexicalWeight:  0.0,
+		SymbolicWeight: 0.6,
+		EnableAdaptive: false,
+		BaseK:          2,
+		Delta:          2.0,
+		MinK:           2,
+		MaxK:           20,
+	}
+
+	llmFake := &fakeLLMClient{response: `{"type":"factual","keywords":["zephyr","status"],"entities":["ProjectZephyr"],"complexity":0.2,"retrieval_depth":2}`}
+	eng.SetLLMClient(llmFake)
+
+	if err := eng.Add(context.Background(), "ns", "general status winner", 0.2); err != nil {
+		t.Fatalf("add general doc failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "project zephyr constrained", 0.2); err != nil {
+		t.Fatalf("add constrained doc failed: %v", err)
+	}
+
+	mustTagEntityOnContent(t, eng, "ns", "project zephyr constrained", "ProjectZephyr")
+
+	res, err := eng.Search(context.Background(), "ns", "zephyr status check")
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(res))
+	}
+	if res[0].Content != "project zephyr constrained" {
+		t.Fatalf("expected symbolic-constrained doc ranked first, got %q", res[0].Content)
+	}
+}
+
+func TestHybrid_Fusion_SymbolicBaseline_NoConstraints(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+
+	emb := &fakeEmbedder{vectors: map[string][]float64{
+		"zephyr status check":        {1, 0},
+		"general status winner":      {1, 0},
+		"project zephyr constrained": {0.8, 0.6},
+	}}
+
+	eng := newHybridTestEngine(emb, now)
+	eng.config.HybridSearchConfig = config.HybridSearchConfig{
+		SemanticWeight: 0.7,
+		LexicalWeight:  0.0,
+		SymbolicWeight: 0.3,
+		EnableAdaptive: false,
+		BaseK:          2,
+		Delta:          2.0,
+		MinK:           2,
+		MaxK:           20,
+	}
+
+	llmFake := &fakeLLMClient{response: `{"type":"factual","keywords":["zephyr","status"],"entities":[],"complexity":0.2,"retrieval_depth":2}`}
+	eng.SetLLMClient(llmFake)
+
+	if err := eng.Add(context.Background(), "ns", "general status winner", 0.2); err != nil {
+		t.Fatalf("add general doc failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "project zephyr constrained", 0.2); err != nil {
+		t.Fatalf("add constrained doc failed: %v", err)
+	}
+
+	mustTagEntityOnContent(t, eng, "ns", "project zephyr constrained", "ProjectZephyr")
+
+	res, err := eng.Search(context.Background(), "ns", "zephyr status check")
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(res))
+	}
+	if res[0].Content != "general status winner" {
+		t.Fatalf("expected baseline symbolic scoring to keep semantic winner first, got %q", res[0].Content)
+	}
+}
+
+func TestHybrid_Output_CountOrderingAndLastAccessedAt(t *testing.T) {
+	addNow := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	searchNow := addNow.Add(15 * time.Minute)
+
+	emb := &fakeEmbedder{vectors: map[string][]float64{
+		"output ranking probe": {1, 0},
+		"rank one":             {1, 0},
+		"rank two":             {0.8, 0.6},
+		"rank three":           {0, 1},
+	}}
+
+	eng := newHybridTestEngine(emb, addNow)
+	eng.config.HybridSearchConfig = config.HybridSearchConfig{
+		SemanticWeight: 1.0,
+		LexicalWeight:  0.0,
+		SymbolicWeight: 0.0,
+		EnableAdaptive: false,
+		BaseK:          2,
+		Delta:          2.0,
+		MinK:           2,
+		MaxK:           20,
+	}
+
+	llmFake := &fakeLLMClient{response: `{"type":"factual","keywords":["output","ranking"],"entities":[],"complexity":0.2,"retrieval_depth":2}`}
+	eng.SetLLMClient(llmFake)
+
+	if err := eng.Add(context.Background(), "ns", "rank one", 0.2); err != nil {
+		t.Fatalf("add rank one failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "rank two", 0.2); err != nil {
+		t.Fatalf("add rank two failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "rank three", 0.2); err != nil {
+		t.Fatalf("add rank three failed: %v", err)
+	}
+
+	eng.nowFn = func() time.Time { return searchNow }
+
+	res, err := eng.Search(context.Background(), "ns", "output ranking probe")
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("expected retrieval_depth count 2, got %d", len(res))
+	}
+	if res[0].Content != "rank one" {
+		t.Fatalf("expected first result rank one, got %q", res[0].Content)
+	}
+	if res[1].Content != "rank two" {
+		t.Fatalf("expected second result rank two, got %q", res[1].Content)
+	}
+	for _, item := range res {
+		if !item.LastAccessedAt.Equal(searchNow) {
+			t.Fatalf("expected returned LastAccessedAt=%v got=%v", searchNow, item.LastAccessedAt)
+		}
+	}
+
+	all, err := eng.Get("ns")
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+
+	rankOne := findByContent(t, all, "rank one")
+	rankTwo := findByContent(t, all, "rank two")
+	rankThree := findByContent(t, all, "rank three")
+
+	if !rankOne.LastAccessedAt.Equal(searchNow) {
+		t.Fatalf("expected persisted rank one LastAccessedAt=%v got=%v", searchNow, rankOne.LastAccessedAt)
+	}
+	if !rankTwo.LastAccessedAt.Equal(searchNow) {
+		t.Fatalf("expected persisted rank two LastAccessedAt=%v got=%v", searchNow, rankTwo.LastAccessedAt)
+	}
+	if !rankThree.LastAccessedAt.Equal(addNow) {
+		t.Fatalf("expected non-returned rank three LastAccessedAt to remain %v got=%v", addNow, rankThree.LastAccessedAt)
+	}
+}
+
+func findByContent(t *testing.T, items []*MemoryItem, content string) *MemoryItem {
+	t.Helper()
+
+	for _, item := range items {
+		if item.Content == content {
+			return item
+		}
+	}
+
+	t.Fatalf("content %q not found", content)
+	return nil
+}
+
 func mustTagEntityOnContent(t *testing.T, eng *MemoryEngine, namespace, content, entity string) {
 	t.Helper()
 
