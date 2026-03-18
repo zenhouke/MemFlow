@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"memflow/core/config"
+	"memflow/core/llm"
 	"memflow/core/vectorstore"
 	"time"
 )
@@ -35,6 +36,20 @@ type fakeEstimator struct {
 	calls int
 }
 
+type fakeLLMClient struct {
+	response      string
+	err           error
+	chatCallCount int
+}
+
+func (f *fakeLLMClient) Chat(ctx context.Context, messages []llm.Message) (string, error) {
+	f.chatCallCount++
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.response, nil
+}
+
 func (f *fakeEstimator) Estimate(ctx context.Context, content string) (float64, error) {
 	f.calls++
 	if f.err != nil {
@@ -54,7 +69,19 @@ func (f *fakeVectorStore) Add(ctx context.Context, vectors []vectorstore.VectorR
 	if f.addErr != nil {
 		return f.addErr
 	}
-	f.added = append(f.added, vectors...)
+	for _, v := range vectors {
+		rec := vectorstore.VectorRecord{
+			ID:     v.ID,
+			Vector: append([]float32(nil), v.Vector...),
+		}
+		if v.Payload != nil {
+			rec.Payload = make(map[string]interface{}, len(v.Payload))
+			for k, val := range v.Payload {
+				rec.Payload[k] = val
+			}
+		}
+		f.added = append(f.added, rec)
+	}
 	return nil
 }
 
@@ -85,12 +112,35 @@ func newTestConfig() config.Config {
 	return cfg
 }
 
-func newTestEngineWithNow(embed *fakeEmbedder, now time.Time) *MemoryEngine {
+func newEngineWithConfigAndNow(cfg config.Config, embed *fakeEmbedder, now time.Time) *MemoryEngine {
 	if embed == nil {
 		embed = &fakeEmbedder{}
 	}
-	eng := New(newTestConfig(), embed)
+	eng := New(cfg, embed)
 	eng.nowFn = func() time.Time { return now }
 	eng.disableAsyncCompaction = true
 	return eng
+}
+
+func newTestEngineWithNow(embed *fakeEmbedder, now time.Time) *MemoryEngine {
+	return newEngineWithConfigAndNow(newTestConfig(), embed, now)
+}
+
+func newHybridTestEngine(embed *fakeEmbedder, now time.Time) *MemoryEngine {
+	if embed == nil {
+		embed = &fakeEmbedder{}
+	}
+	cfg := newTestConfig()
+	cfg.EnableHybridSearch = true
+	cfg.HybridSearchConfig = config.HybridSearchConfig{
+		SemanticWeight: 0.6,
+		LexicalWeight:  0.3,
+		SymbolicWeight: 0.1,
+		EnableAdaptive: true,
+		BaseK:          5,
+		Delta:          2.0,
+		MinK:           3,
+		MaxK:           20,
+	}
+	return newEngineWithConfigAndNow(cfg, embed, now)
 }
