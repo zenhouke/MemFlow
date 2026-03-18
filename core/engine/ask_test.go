@@ -110,6 +110,35 @@ func TestAsk_Success_ReturnsLLMAnswer(t *testing.T) {
 	}
 }
 
+func TestAskHybrid_Success_ReturnsLLMAnswer(t *testing.T) {
+	emb := &fakeEmbedder{vectors: map[string][]float64{
+		"project status":          {1, 0},
+		"hybrid matching memory":  {1, 0},
+		"hybrid unrelated memory": {0, 1},
+	}}
+	eng := newAskTestEngineHybrid(emb)
+	llmResponse := "Hybrid retrieval answer from LLM."
+	llmClient := &fakeLLMClient{response: llmResponse}
+	eng.SetLLMClient(llmClient)
+
+	if err := eng.Add(context.Background(), "ns", "hybrid matching memory", 0.3); err != nil {
+		t.Fatalf("Add matching memory failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "hybrid unrelated memory", 0.3); err != nil {
+		t.Fatalf("Add unrelated memory failed: %v", err)
+	}
+
+	got, err := eng.Ask(context.Background(), "ns", "project status")
+	if err != nil {
+		t.Fatalf("Ask returned error: %v", err)
+	}
+	if got != llmResponse {
+		t.Fatalf("expected unchanged llm answer passthrough: got %q want %q", got, llmResponse)
+	}
+
+	assertAskPromptMessageContract(t, llmClient)
+}
+
 func TestAsk_PromptContainsRequiredFragments(t *testing.T) {
 	emb := &fakeEmbedder{vectors: map[string][]float64{
 		"what should I remember?": {1.0, 0.0},
@@ -145,6 +174,54 @@ func TestAsk_PromptContainsRequiredFragments(t *testing.T) {
 	for _, fragment := range required {
 		if !strings.Contains(userPrompt, fragment) {
 			t.Fatalf("user prompt missing required fragment %q\nprompt: %q", fragment, userPrompt)
+		}
+	}
+}
+
+func TestAskHybrid_PromptContainsRequiredFragments(t *testing.T) {
+	emb := &fakeEmbedder{vectors: map[string][]float64{
+		"memory recap":               {1.0, 0.0},
+		"hybrid first memory block":  {1.0, 0.0},
+		"hybrid second memory block": {0.4, 0.0},
+	}}
+	eng := newAskTestEngineHybrid(emb)
+	llmClient := &fakeLLMClient{response: "ok"}
+	eng.SetLLMClient(llmClient)
+
+	if err := eng.Add(context.Background(), "ns", "hybrid first memory block", 0.3); err != nil {
+		t.Fatalf("Add first hybrid memory failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "hybrid second memory block", 0.3); err != nil {
+		t.Fatalf("Add second hybrid memory failed: %v", err)
+	}
+
+	if _, err := eng.Ask(context.Background(), "ns", "memory recap"); err != nil {
+		t.Fatalf("Ask returned error: %v", err)
+	}
+
+	assertAskPromptMessageContract(t, llmClient)
+
+	userPrompt := llmClient.lastMessages[1].Content
+	required := []string{
+		"Based on the following memory context, answer the question.",
+		"Memory Context:",
+		"[1]",
+		"Question: memory recap",
+		"Answer:",
+	}
+	for _, fragment := range required {
+		if !strings.Contains(userPrompt, fragment) {
+			t.Fatalf("user prompt missing required fragment %q\nprompt: %q", fragment, userPrompt)
+		}
+	}
+
+	requiredHybridMemoryFragments := []string{
+		"hybrid first memory block",
+		"hybrid second memory block",
+	}
+	for _, fragment := range requiredHybridMemoryFragments {
+		if !strings.Contains(userPrompt, fragment) {
+			t.Fatalf("user prompt missing required hybrid memory content %q; prompt: %q", fragment, userPrompt)
 		}
 	}
 }
