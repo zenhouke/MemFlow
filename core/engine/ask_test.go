@@ -226,6 +226,79 @@ func TestAskHybrid_PromptContainsRequiredFragments(t *testing.T) {
 	}
 }
 
+func TestAskHybrid_PromptIncludesSourceWhenOriginalContentPresent(t *testing.T) {
+	emb := &fakeEmbedder{vectors: map[string][]float64{
+		"origin":                       {1.0, 0.0},
+		"hybrid first memory summary":  {1.0, 0.0},
+		"hybrid second memory summary": {0.4, 0.0},
+	}}
+	eng := newAskTestEngineHybrid(emb)
+	llmClient := &fakeLLMClient{response: "ok"}
+	eng.SetLLMClient(llmClient)
+
+	if err := eng.Add(context.Background(), "ns", "hybrid first memory summary", 0.3); err != nil {
+		t.Fatalf("Add first hybrid memory failed: %v", err)
+	}
+	if err := eng.Add(context.Background(), "ns", "hybrid second memory summary", 0.3); err != nil {
+		t.Fatalf("Add second hybrid memory failed: %v", err)
+	}
+
+	eng.mu.Lock()
+	space := eng.getOrCreateSpace("ns")
+	eng.mu.Unlock()
+
+	space.mu.Lock()
+	updated := false
+	for _, item := range space.ShortTerm {
+		if item.Content == "hybrid first memory summary" {
+			item.OriginalContent = "Hybrid original source sentence one."
+			updated = true
+			break
+		}
+	}
+	space.mu.Unlock()
+	if !updated {
+		t.Fatal("failed to locate first hybrid memory item for source injection")
+	}
+
+	if _, err := eng.Ask(context.Background(), "ns", "origin"); err != nil {
+		t.Fatalf("Ask returned error: %v", err)
+	}
+
+	assertAskPromptMessageContract(t, llmClient)
+
+	userPrompt := llmClient.lastMessages[1].Content
+	required := []string{
+		"hybrid first memory summary",
+		"hybrid second memory summary",
+		"Source: Hybrid original source sentence one.",
+	}
+	for _, fragment := range required {
+		if !strings.Contains(userPrompt, fragment) {
+			t.Fatalf("user prompt missing required fragment %q\nprompt: %q", fragment, userPrompt)
+		}
+	}
+}
+
+func TestAskHybrid_NoRelevantMemories_ReturnsFallback(t *testing.T) {
+	eng := newAskTestEngineHybrid(&fakeEmbedder{vectors: map[string][]float64{
+		"question": {1, 0},
+	}})
+	llmClient := &fakeLLMClient{response: "should not be used"}
+	eng.SetLLMClient(llmClient)
+
+	got, err := eng.Ask(context.Background(), "ns", "question")
+	if err != nil {
+		t.Fatalf("Ask returned error: %v", err)
+	}
+	if want := "No relevant memories found."; got != want {
+		t.Fatalf("unexpected fallback text: got %q want %q", got, want)
+	}
+	if llmClient.chatCallCount != 0 {
+		t.Fatalf("expected llm chat not called, got %d", llmClient.chatCallCount)
+	}
+}
+
 func TestAsk_PromptIncludesSourceWhenOriginalContentPresent(t *testing.T) {
 	emb := &fakeEmbedder{vectors: map[string][]float64{
 		"where did this come from?": {1.0, 0.0},
