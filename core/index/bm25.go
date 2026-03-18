@@ -32,6 +32,24 @@ func (idx *BM25Index) Add(docID string, doc string) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
+	if oldDoc, exists := idx.documents[docID]; exists {
+		oldTerms := idx.tokenize(oldDoc)
+		idx.totalLen -= len(oldTerms)
+
+		seenOld := make(map[string]bool)
+		for _, term := range oldTerms {
+			if !seenOld[term] {
+				idx.docFreq[term]--
+				if idx.docFreq[term] <= 0 {
+					delete(idx.docFreq, term)
+				}
+				seenOld[term] = true
+			}
+		}
+	} else {
+		idx.docCount++
+	}
+
 	idx.documents[docID] = doc
 
 	terms := idx.tokenize(doc)
@@ -45,8 +63,6 @@ func (idx *BM25Index) Add(docID string, doc string) {
 			seen[term] = true
 		}
 	}
-
-	idx.docCount++
 	idx.recalculateAvgDocLen()
 }
 
