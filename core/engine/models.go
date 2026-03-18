@@ -74,12 +74,3 @@ func (s *MemorySpace) RebuildIndex() {
 		s.longMetadata.Add(item.ID, item.Metadata)
 	}
 }
-
-type HNSWIndex struct {
-	graph *hnsw.Graph[string]
-}
-
-type TimeIndexEntry struct {
-	DocID     int
-	Timestamp time.Time
-}

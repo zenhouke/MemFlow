@@ -6,11 +6,6 @@ import (
 	"time"
 )
 
-type timeIndexEntry struct {
-	docID     int
-	timestamp time.Time
-}
-
 type Metadata struct {
 	Entities  []string
 	Topic     string

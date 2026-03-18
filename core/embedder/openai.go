@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 )
 
@@ -65,7 +65,7 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, text string) ([]float64, err
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("OpenAI Embedding API error (status %d): %s", resp.StatusCode, string(body))
 	}
 

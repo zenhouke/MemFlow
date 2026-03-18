@@ -6,11 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"memflow/core/config"
+	"net/http"
 	"sort"
 	"strings"
-	"sync"
 )
 
 func init() {
@@ -25,14 +24,11 @@ func init() {
 // 2. 嵌入式简化实现（用于开发测试）
 // 这里实现 REST API 方式
 type LanceDBStore struct {
-	baseURL        string
-	tableName      string
-	dimension      int
-	httpClient     *http.Client
-	mu             sync.RWMutex
+	baseURL    string
+	tableName  string
+	dimension  int
+	httpClient *http.Client
 }
-
-
 
 func (l *LanceDBStore) ensureTable(ctx context.Context) error {
 	createReq := map[string]interface{}{
@@ -150,9 +146,9 @@ func (l *LanceDBStore) Search(ctx context.Context, query []float32, topK int, fi
 
 	var searchResp struct {
 		Results []struct {
-			ID       string                 `json:"id"`
-			Score    float32                `json:"_distance"`
-			Payload  map[string]interface{} `json:"payload"`
+			ID      string                 `json:"id"`
+			Score   float32                `json:"_distance"`
+			Payload map[string]interface{} `json:"payload"`
 		} `json:"results"`
 	}
 
@@ -281,4 +277,3 @@ func buildLanceDBCondition(cond Condition) string {
 	}
 	return ""
 }
-

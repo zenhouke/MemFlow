@@ -66,13 +66,15 @@ func (m *MemoryEngine) Add(ctx context.Context, namespace, content string, impor
 		// 同步到外部存储
 		if m.store != nil {
 			payload := m.memoryItemToPayload(item, namespace)
-			m.store.Add(ctx, []vectorstore.VectorRecord{
+			if err := m.store.Add(ctx, []vectorstore.VectorRecord{
 				{
 					ID:      item.ID,
 					Vector:  utils.ToFloat32(item.Embedding),
 					Payload: payload,
 				},
-			})
+			}); err != nil {
+				return err
+			}
 		}
 	} else {
 		space.ShortTerm = append(space.ShortTerm, item)
@@ -201,13 +203,16 @@ func (m *MemoryEngine) AddDialogues(ctx context.Context, namespace string, dialo
 			// 同步到外部存储
 			if m.store != nil {
 				payload := m.memoryItemToPayload(item, namespace)
-				m.store.Add(ctx, []vectorstore.VectorRecord{
+				if err := m.store.Add(ctx, []vectorstore.VectorRecord{
 					{
 						ID:      item.ID,
 						Vector:  utils.ToFloat32(item.Embedding),
 						Payload: payload,
 					},
-				})
+				}); err != nil {
+					space.mu.Unlock()
+					return err
+				}
 			}
 		} else {
 			space.ShortTerm = append(space.ShortTerm, item)

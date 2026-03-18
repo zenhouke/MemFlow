@@ -53,7 +53,6 @@ type MilvusStore struct {
 	dimension      int
 }
 
-
 func marshalJSON(v interface{}) ([]byte, error) {
 	return json.Marshal(v)
 }
@@ -210,7 +209,9 @@ func (m *MilvusStore) Search(ctx context.Context, query []float32, topK int, fil
 			// 从 payload 字段反序列化
 			if payloadCol, ok := sr.Fields.GetColumn("payload").(*entity.ColumnJSONBytes); ok {
 				if data, err := payloadCol.GetAsString(i); err == nil {
-					unmarshalJSON([]byte(data), &payload)
+					if err := unmarshalJSON([]byte(data), &payload); err != nil {
+						continue
+					}
 				}
 			}
 

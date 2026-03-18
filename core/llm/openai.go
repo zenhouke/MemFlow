@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 )
 
@@ -68,7 +68,7 @@ func (c *OpenAILLMClient) Chat(ctx context.Context, messages []Message) (string,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
 	}
 

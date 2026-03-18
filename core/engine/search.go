@@ -286,7 +286,7 @@ func (hr *HybridRetriever) Search(
 		}
 	}
 
-	k := hr.config.BaseK
+	var k int
 	if hr.config.EnableAdaptive {
 		k = retrieval.CalculateDynamicK(hr.config.BaseK, intent.Complexity, hr.config.Delta)
 		if k < hr.config.MinK {

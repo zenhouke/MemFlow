@@ -108,26 +108,6 @@ func (m *MemoryEngine) compact(ctx context.Context, space *MemorySpace) {
 	}
 }
 
-func (m *MemoryEngine) cluster(memories []*MemoryItem) [][]*MemoryItem {
-	var clusters [][]*MemoryItem
-
-	for _, mem := range memories {
-		added := false
-		for i, cluster := range clusters {
-			if utils.Cosine(mem.Embedding, cluster[0].Embedding) > m.config.MergeSimilarityThreshold {
-				clusters[i] = append(clusters[i], mem)
-				added = true
-				break
-			}
-		}
-		if !added {
-			clusters = append(clusters, []*MemoryItem{mem})
-		}
-	}
-
-	return clusters
-}
-
 func (m *MemoryEngine) clusterWithTemporalAffinity(memories []*MemoryItem) [][]*MemoryItem {
 	if len(memories) == 0 {
 		return nil
