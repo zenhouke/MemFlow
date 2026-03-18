@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"memflow/core/compression"
 	"memflow/core/config"
 	"memflow/core/embedder"
@@ -12,17 +13,18 @@ import (
 )
 
 type MemoryEngine struct {
-	spaces                 map[string]*MemorySpace
-	embedder               embedder.Embedder
-	llmClient              llm.LLMClient
-	estimator              ImportanceEstimator
-	summarizer             summarizer.Summarizer
-	compressor             *compression.SemanticCompressor
-	config                 config.Config
-	store                  vectorstore.VectorStore // 新增：外部向量存储
-	nowFn                  func() time.Time
-	disableAsyncCompaction bool
-	mu                     sync.RWMutex
+	spaces                   map[string]*MemorySpace
+	embedder                 embedder.Embedder
+	llmClient                llm.LLMClient
+	estimator                ImportanceEstimator
+	summarizer               summarizer.Summarizer
+	compressor               *compression.SemanticCompressor
+	config                   config.Config
+	store                    vectorstore.VectorStore // 新增：外部向量存储
+	nowFn                    func() time.Time
+	disableAsyncCompaction   bool
+	testHybridSearchOverride func(context.Context, string, []float64, *MemorySpace, time.Time) ([]*MemoryItem, error)
+	mu                       sync.RWMutex
 }
 
 func New(cfg config.Config, embedder embedder.Embedder) *MemoryEngine {

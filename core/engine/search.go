@@ -27,11 +27,16 @@ func (m *MemoryEngine) Search(ctx context.Context, namespace, query string) ([]*
 	now := m.nowFn()
 
 	m.mu.RLock()
-	space := m.getOrCreateSpace(namespace)
+	space, ok := m.getSpace(namespace)
 	m.mu.RUnlock()
+	if !ok {
+		m.mu.Lock()
+		space = m.getOrCreateSpace(namespace)
+		m.mu.Unlock()
+	}
 
-	space.mu.RLock()
-	defer space.mu.RUnlock()
+	space.mu.Lock()
+	defer space.mu.Unlock()
 
 	if m.config.EnableHybridSearch {
 		return m.hybridSearch(ctx, query, queryEmbedding, space, now)
@@ -47,6 +52,9 @@ func (m *MemoryEngine) hybridSearch(
 	space *MemorySpace,
 	now time.Time,
 ) ([]*MemoryItem, error) {
+	if m.testHybridSearchOverride != nil {
+		return m.testHybridSearchOverride(ctx, query, queryEmbedding, space, now)
+	}
 
 	analyzer := retrieval.NewQueryAnalyzer(m.llmClient, m.config.HybridSearchConfig.BaseK)
 

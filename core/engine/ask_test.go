@@ -166,8 +166,10 @@ func TestAsk_PromptContainsRequiredFragments(t *testing.T) {
 	required := []string{
 		"Based on the following memory context, answer the question.",
 		"Memory Context:",
-		"[1] first memory summary",
-		"[2] second memory summary",
+		"[1]",
+		"[2]",
+		"first memory summary",
+		"second memory summary",
 		"Question: what should I remember?",
 		"Answer:",
 	}
@@ -296,6 +298,76 @@ func TestAskHybrid_NoRelevantMemories_ReturnsFallback(t *testing.T) {
 	}
 	if llmClient.chatCallCount != 0 {
 		t.Fatalf("expected llm chat not called, got %d", llmClient.chatCallCount)
+	}
+}
+
+func TestAskHybrid_SearchEmbedderError_Propagates(t *testing.T) {
+	searchErr := errors.New("hybrid search embedder failed")
+	eng := newAskTestEngineHybrid(&fakeEmbedder{err: searchErr})
+	llmClient := &fakeLLMClient{response: "ok"}
+	eng.SetLLMClient(llmClient)
+
+	_, err := eng.Ask(context.Background(), "ns", "project status")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err != searchErr {
+		t.Fatalf("expected exact embedder error passthrough, got %v", err)
+	}
+	if llmClient.chatCallCount != 0 {
+		t.Fatalf("expected llm chat not called, got %d", llmClient.chatCallCount)
+	}
+}
+
+func TestAskHybrid_HybridRetrievalError_Propagates(t *testing.T) {
+	retrievalErr := errors.New("hybrid retrieval failed")
+	eng := newAskTestEngineHybrid(&fakeEmbedder{vectors: map[string][]float64{
+		"project status": {1, 0},
+	}})
+	eng.testHybridSearchOverride = func(ctx context.Context, query string, queryEmbedding []float64, space *MemorySpace, now time.Time) ([]*MemoryItem, error) {
+		return nil, retrievalErr
+	}
+	t.Cleanup(func() {
+		eng.testHybridSearchOverride = nil
+	})
+
+	llmClient := &fakeLLMClient{response: "ok"}
+	eng.SetLLMClient(llmClient)
+
+	_, err := eng.Ask(context.Background(), "ns", "project status")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err != retrievalErr {
+		t.Fatalf("expected exact hybrid retrieval error passthrough, got %v", err)
+	}
+	if llmClient.chatCallCount != 0 {
+		t.Fatalf("expected llm chat not called, got %d", llmClient.chatCallCount)
+	}
+}
+
+func TestAskHybrid_LLMError_Propagates(t *testing.T) {
+	llmErr := errors.New("llm chat failed")
+	eng := newAskTestEngineHybrid(&fakeEmbedder{vectors: map[string][]float64{
+		"project status":         {1, 0},
+		"hybrid matching memory": {1, 0},
+	}})
+	llmClient := &fakeLLMClient{err: llmErr}
+	eng.SetLLMClient(llmClient)
+
+	if err := eng.Add(context.Background(), "ns", "hybrid matching memory", 0.3); err != nil {
+		t.Fatalf("Add matching memory failed: %v", err)
+	}
+
+	_, err := eng.Ask(context.Background(), "ns", "project status")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err != llmErr {
+		t.Fatalf("expected exact llm error passthrough, got %v", err)
+	}
+	if llmClient.chatCallCount != 1 {
+		t.Fatalf("expected llm chat called once, got %d", llmClient.chatCallCount)
 	}
 }
 
