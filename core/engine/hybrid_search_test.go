@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"memflow/core/config"
 	"testing"
 	"time"
@@ -99,4 +100,117 @@ func mustTagEntityOnContent(t *testing.T, eng *MemoryEngine, namespace, content,
 	}
 
 	t.Fatalf("content %q not found in short-term memory", content)
+}
+
+func TestHybrid_KSelection_AdaptiveClamp(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name       string
+		complexity float64
+		baseK      int
+		delta      float64
+		minK       int
+		maxK       int
+		wantK      int
+	}{
+		{name: "clamps_to_min", complexity: 0.0, baseK: 5, delta: 2.0, minK: 3, maxK: 20, wantK: 5},
+		{name: "clamps_to_max", complexity: 1.0, baseK: 5, delta: 2.0, minK: 3, maxK: 8, wantK: 8},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := newHybridTestEngine(&fakeEmbedder{fixed: []float64{1, 0}}, now)
+			eng.config.HybridSearchConfig = config.HybridSearchConfig{
+				SemanticWeight: 0.6,
+				LexicalWeight:  0.3,
+				SymbolicWeight: 0.1,
+				EnableAdaptive: true,
+				BaseK:          tc.baseK,
+				Delta:          tc.delta,
+				MinK:           tc.minK,
+				MaxK:           tc.maxK,
+			}
+
+			llmFake := &fakeLLMClient{response: fmt.Sprintf(`{"type":"factual","complexity":%.1f,"retrieval_depth":3}`, tc.complexity)}
+			eng.SetLLMClient(llmFake)
+
+			addKSelectionFixtures(t, eng, "ns", 16)
+
+			res, err := eng.Search(context.Background(), "ns", "kselection shared terms")
+			if err != nil {
+				t.Fatalf("search failed: %v", err)
+			}
+			if len(res) != tc.wantK {
+				t.Fatalf("expected %d results, got %d", tc.wantK, len(res))
+			}
+		})
+	}
+}
+
+func TestHybrid_KSelection_AdaptiveDeltaZeroUsesDefault(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	eng := newHybridTestEngine(&fakeEmbedder{fixed: []float64{1, 0}}, now)
+	eng.config.HybridSearchConfig = config.HybridSearchConfig{
+		SemanticWeight: 0.6,
+		LexicalWeight:  0.3,
+		SymbolicWeight: 0.1,
+		EnableAdaptive: true,
+		BaseK:          5,
+		Delta:          0,
+		MinK:           3,
+		MaxK:           20,
+	}
+
+	llmFake := &fakeLLMClient{response: `{"type":"factual","complexity":0.5,"retrieval_depth":3}`}
+	eng.SetLLMClient(llmFake)
+
+	addKSelectionFixtures(t, eng, "ns", 16)
+
+	res, err := eng.Search(context.Background(), "ns", "kselection shared terms")
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(res) != 10 {
+		t.Fatalf("expected 10 results, got %d", len(res))
+	}
+}
+
+func TestHybrid_KSelection_NonAdaptiveUsesIntentDepth(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	eng := newHybridTestEngine(&fakeEmbedder{fixed: []float64{1, 0}}, now)
+	eng.config.HybridSearchConfig = config.HybridSearchConfig{
+		SemanticWeight: 0.6,
+		LexicalWeight:  0.3,
+		SymbolicWeight: 0.1,
+		EnableAdaptive: false,
+		BaseK:          3,
+		Delta:          2.0,
+		MinK:           3,
+		MaxK:           20,
+	}
+
+	llmFake := &fakeLLMClient{response: `{"type":"factual","complexity":0.1,"retrieval_depth":7}`}
+	eng.SetLLMClient(llmFake)
+
+	addKSelectionFixtures(t, eng, "ns", 16)
+
+	res, err := eng.Search(context.Background(), "ns", "kselection shared terms")
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(res) != 7 {
+		t.Fatalf("expected 7 results, got %d", len(res))
+	}
+}
+
+func addKSelectionFixtures(t *testing.T, eng *MemoryEngine, namespace string, count int) {
+	t.Helper()
+
+	for i := 0; i < count; i++ {
+		content := fmt.Sprintf("kselection fixture doc %02d shared terms", i)
+		if err := eng.Add(context.Background(), namespace, content, 0.4); err != nil {
+			t.Fatalf("add fixture %d failed: %v", i, err)
+		}
+	}
 }
