@@ -40,10 +40,12 @@ type fakeLLMClient struct {
 	response      string
 	err           error
 	chatCallCount int
+	lastMessages  []llm.Message
 }
 
 func (f *fakeLLMClient) Chat(ctx context.Context, messages []llm.Message) (string, error) {
 	f.chatCallCount++
+	f.lastMessages = append([]llm.Message(nil), messages...)
 	if f.err != nil {
 		return "", f.err
 	}
