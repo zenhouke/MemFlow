@@ -4,16 +4,35 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"memflow/core/config"
 	"memflow/core/vectorstore"
 	"strings"
 	"testing"
 	"time"
 )
 
+var askTestFixedNow = time.Date(2026, time.March, 18, 10, 0, 0, 0, time.UTC)
+
 func newAskTestEngineSimple(embed *fakeEmbedder) *MemoryEngine {
 	cfg := newTestConfig()
 	cfg.EnableHybridSearch = false
-	return newEngineWithConfigAndNow(cfg, embed, time.Date(2026, time.March, 18, 10, 0, 0, 0, time.UTC))
+	return newEngineWithConfigAndNow(cfg, embed, askTestFixedNow)
+}
+
+func newAskTestEngineHybrid(embed *fakeEmbedder) *MemoryEngine {
+	cfg := newTestConfig()
+	cfg.EnableHybridSearch = true
+	cfg.HybridSearchConfig = config.HybridSearchConfig{
+		SemanticWeight: 0.6,
+		LexicalWeight:  0.3,
+		SymbolicWeight: 0.1,
+		EnableAdaptive: true,
+		BaseK:          5,
+		Delta:          2.0,
+		MinK:           3,
+		MaxK:           20,
+	}
+	return newEngineWithConfigAndNow(cfg, embed, askTestFixedNow)
 }
 
 func TestAsk_NoLLMClient_ReturnsError(t *testing.T) {
@@ -207,6 +226,14 @@ func TestAsk_PromptIncludesSourceWhenOriginalContentPresent(t *testing.T) {
 }
 
 func assertAskPromptMessageContract(t *testing.T, llmClient *fakeLLMClient) {
+	assertAskPromptMessageContractWithUserSections(t, llmClient,
+		"Memory Context:",
+		"Question:",
+		"Answer:",
+	)
+}
+
+func assertAskPromptMessageContractWithUserSections(t *testing.T, llmClient *fakeLLMClient, userSections ...string) {
 	t.Helper()
 
 	if llmClient.chatCallCount != 1 {
@@ -218,10 +245,20 @@ func assertAskPromptMessageContract(t *testing.T, llmClient *fakeLLMClient) {
 	if got, want := llmClient.lastMessages[0].Role, "system"; got != want {
 		t.Fatalf("unexpected first message role: got %q want %q", got, want)
 	}
-	if !strings.Contains(llmClient.lastMessages[0].Content, "answers questions based on the provided memory context") {
-		t.Fatalf("unexpected system message content: %q", llmClient.lastMessages[0].Content)
+	if strings.TrimSpace(llmClient.lastMessages[0].Content) == "" {
+		t.Fatal("expected non-empty system message content")
 	}
 	if got, want := llmClient.lastMessages[1].Role, "user"; got != want {
 		t.Fatalf("unexpected second message role: got %q want %q", got, want)
+	}
+	if !strings.Contains(llmClient.lastMessages[0].Content, "answers questions based on the provided memory context") {
+		t.Fatalf("unexpected system message content: %q", llmClient.lastMessages[0].Content)
+	}
+
+	userPrompt := llmClient.lastMessages[1].Content
+	for _, section := range userSections {
+		if !strings.Contains(userPrompt, section) {
+			t.Fatalf("user prompt missing required section %q\nprompt: %q", section, userPrompt)
+		}
 	}
 }
