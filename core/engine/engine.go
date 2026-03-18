@@ -8,18 +8,21 @@ import (
 	"memflow/core/summarizer"
 	"memflow/core/vectorstore"
 	"sync"
+	"time"
 )
 
 type MemoryEngine struct {
-	spaces     map[string]*MemorySpace
-	embedder   embedder.Embedder
-	llmClient  llm.LLMClient
-	estimator  ImportanceEstimator
-	summarizer summarizer.Summarizer
-	compressor *compression.SemanticCompressor
-	config     config.Config
-	store      vectorstore.VectorStore // 新增：外部向量存储
-	mu         sync.RWMutex
+	spaces                 map[string]*MemorySpace
+	embedder               embedder.Embedder
+	llmClient              llm.LLMClient
+	estimator              ImportanceEstimator
+	summarizer             summarizer.Summarizer
+	compressor             *compression.SemanticCompressor
+	config                 config.Config
+	store                  vectorstore.VectorStore // 新增：外部向量存储
+	nowFn                  func() time.Time
+	disableAsyncCompaction bool
+	mu                     sync.RWMutex
 }
 
 func New(cfg config.Config, embedder embedder.Embedder) *MemoryEngine {
@@ -27,6 +30,7 @@ func New(cfg config.Config, embedder embedder.Embedder) *MemoryEngine {
 		spaces:   make(map[string]*MemorySpace),
 		embedder: embedder,
 		config:   cfg,
+		nowFn:    time.Now,
 	}
 
 	// 初始化外部存储（如果配置了且不是内存模式）

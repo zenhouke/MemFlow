@@ -24,7 +24,7 @@ func (m *MemoryEngine) Search(ctx context.Context, namespace, query string) ([]*
 		return nil, err
 	}
 
-	now := time.Now()
+	now := m.nowFn()
 
 	m.mu.RLock()
 	space := m.getOrCreateSpace(namespace)
@@ -108,29 +108,33 @@ func (m *MemoryEngine) collectAndScore(ctx context.Context, now time.Time, q []f
 	seenIDs := make(map[string]bool)
 
 	// 1. 内存短期记忆检索
-	shortNeighbors := space.shortIndex.Search(q32, m.config.TopK)
-	for _, vec := range shortNeighbors {
-		id := vec.Key
-		mem := m.findMemoryItemByID(space.ShortTerm, id)
-		if mem != nil {
-			score := m.score(now, q, mem, m.config.ShortTermDecay)
-			results = append(results, scored{mem, score})
-			seenIDs[id] = true
+	if len(space.ShortTerm) > 0 && space.shortIndex != nil {
+		shortNeighbors := space.shortIndex.Search(q32, m.config.TopK)
+		for _, vec := range shortNeighbors {
+			id := vec.Key
+			mem := m.findMemoryItemByID(space.ShortTerm, id)
+			if mem != nil {
+				score := m.score(now, q, mem, m.config.ShortTermDecay)
+				results = append(results, scored{mem, score})
+				seenIDs[id] = true
+			}
 		}
 	}
 
 	// 2. 内存长期记忆检索
-	longNeighbors := space.longIndex.Search(q32, m.config.TopK)
-	for _, vec := range longNeighbors {
-		id := vec.Key
-		if seenIDs[id] {
-			continue // 避免同一 item 在短/长期重复出现
-		}
-		mem := m.findMemoryItemByID(space.LongTerm, id)
-		if mem != nil {
-			score := m.score(now, q, mem, m.config.LongTermDecay)
-			results = append(results, scored{mem, score})
-			seenIDs[id] = true
+	if len(space.LongTerm) > 0 && space.longIndex != nil {
+		longNeighbors := space.longIndex.Search(q32, m.config.TopK)
+		for _, vec := range longNeighbors {
+			id := vec.Key
+			if seenIDs[id] {
+				continue // 避免同一 item 在短/长期重复出现
+			}
+			mem := m.findMemoryItemByID(space.LongTerm, id)
+			if mem != nil {
+				score := m.score(now, q, mem, m.config.LongTermDecay)
+				results = append(results, scored{mem, score})
+				seenIDs[id] = true
+			}
 		}
 	}
 

@@ -32,7 +32,7 @@ func (m *MemoryEngine) Add(ctx context.Context, namespace, content string, impor
 		return err
 	}
 
-	now := time.Now()
+	now := m.nowFn()
 
 	item := &MemoryItem{
 		ID:             uuid.New().String(),
@@ -83,14 +83,16 @@ func (m *MemoryEngine) Add(ctx context.Context, namespace, content string, impor
 	}
 
 	if len(space.ShortTerm) >= m.config.CompactionThreshold && !space.IsCompacting {
-		// 异步执行压缩，避免阻塞主流程
-		space.IsCompacting = true
-		go func(s *MemorySpace) {
-			m.compact(ctx, s)
-			s.mu.Lock()
-			s.IsCompacting = false
-			s.mu.Unlock()
-		}(space)
+		if !m.disableAsyncCompaction {
+			// 异步执行压缩，避免阻塞主流程
+			space.IsCompacting = true
+			go func(s *MemorySpace) {
+				m.compact(ctx, s)
+				s.mu.Lock()
+				s.IsCompacting = false
+				s.mu.Unlock()
+			}(space)
+		}
 	}
 
 	return nil
@@ -159,7 +161,7 @@ func (m *MemoryEngine) AddDialogues(ctx context.Context, namespace string, dialo
 			continue
 		}
 
-		createdAt := time.Now()
+		createdAt := m.nowFn()
 		if unit.Timestamp != nil {
 			createdAt = *unit.Timestamp
 		}
@@ -216,13 +218,15 @@ func (m *MemoryEngine) AddDialogues(ctx context.Context, namespace string, dialo
 		}
 
 		if len(space.ShortTerm) >= m.config.CompactionThreshold && !space.IsCompacting {
-			space.IsCompacting = true
-			go func(s *MemorySpace) {
-				m.compact(ctx, s)
-				s.mu.Lock()
-				s.IsCompacting = false
-				s.mu.Unlock()
-			}(space)
+			if !m.disableAsyncCompaction {
+				space.IsCompacting = true
+				go func(s *MemorySpace) {
+					m.compact(ctx, s)
+					s.mu.Lock()
+					s.IsCompacting = false
+					s.mu.Unlock()
+				}(space)
+			}
 		}
 
 		space.mu.Unlock()
